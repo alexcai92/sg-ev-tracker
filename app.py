@@ -5,10 +5,10 @@ import folium
 from streamlit_folium import st_folium
 
 # 1. Setup Page Config
-st.set_page_config(page_title="SG EV Live", layout="wide")
-st.title("⚡ Singapore Live EV Charger Tracker")
+st.set_page_config(page_title="SG EV Chargers", layout="wide")
+st.title("⚡ Singapore EV Chargers Live Status")
 
-# 2. Securely get your API Key (We will set this up in Step 4)
+# 2. Securely get your API Key
 LTA_KEY = st.secrets["LTA_ACCOUNT_KEY"]
 
 # 3. Fetch Data from LTA
@@ -67,14 +67,12 @@ data = get_lta_data()
 if data:
     df = pd.DataFrame(data)
     st.success(f"Successfully mapped {len(df)} charging points!")
-    
-    # Now 'Operator' exists because we manually created it in the loop above!
-    st.dataframe(df.head())
-    
-    # Update Map logic to use 'Longitude' (correcting the LTA typo 'longtitude')
-    # ... your folium code here ...
 
-# 5. Display Map
+# Display Data Table
+    st.subheader("Raw Data")
+    st.dataframe(df)
+    
+# Display Map
     st.subheader("Charger Map")
     m = folium.Map(location=[1.3521, 103.8198], zoom_start=12)
     
@@ -87,9 +85,3 @@ if data:
 
     st_folium(m, width=1000, height=500)
 
-    # 6. Display Data Table
-    st.subheader("Raw Data")
-    st.dataframe(df)
-
-#except Exception as e:
-#    st.error(f"Could not load data. Did you set your API Key? Error: {e}")
