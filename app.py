@@ -30,6 +30,7 @@ def get_lta_data():
         # Step 3: Flatten the nested data
         flattened_rows = []
         locations = full_data.get('evLocationsData', [])
+        update_timestamp = full_data.get('LastUpdatedTime', 'Unknown')
         
         for loc in locations:
             # Extract location-level info
@@ -59,20 +60,22 @@ def get_lta_data():
                 
                 flattened_rows.append(row)
                 
-        return flattened_rows
+        return flattened_rows, update_timestamp
         
     except Exception as e:
         st.error(f"Error flattening data: {e}")
         return []
 
 # --- Main App ---
-data = get_lta_data()
+data, update_timestamp = get_lta_data()
 if data:
     df = pd.DataFrame(data)
     st.success(f"Successfully mapped {len(df)} charging points!")
     
 # Display Map
-    st.subheader("Chargers Map")
+    st.subheader("⚡ Charger Map")
+    st.info("Pro-tip: Markers are clustered for speed. Double-click a cluster to zoom into that neighborhood.")
+    st.caption("Data is refreshed every 5 minutes from the LTA DataMall EVCBatch API. Last Updated on **{update_timestamp}**. Allow some time for initial loading of data.")
 
     # 1. Create the base map
     m = folium.Map(location=[1.3521, 103.8198], zoom_start=12)
