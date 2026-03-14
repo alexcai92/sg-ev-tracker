@@ -91,5 +91,5 @@ if data:
     st.subheader("Raw Data")
     st.dataframe(df)
 
-except Exception as e:
-    st.error(f"Could not load data. Did you set your API Key? Error: {e}")
+#except Exception as e:
+#    st.error(f"Could not load data. Did you set your API Key? Error: {e}")
