@@ -14,44 +14,56 @@ LTA_KEY = st.secrets["LTA_ACCOUNT_KEY"]
 # 3. Fetch Data from LTA
 @st.cache_data(ttl=300)
 def get_lta_data():
-    # Step 1: Request the temporary download link
+    # Step 1: Call EVCBatch to get the temporary download link
     url = "https://datamall2.mytransport.sg/ltaodataservice/EVCBatch"
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
     
     response = requests.get(url, headers=headers)
     res_json = response.json()
     
-    # Step 2: Extract the link from the nested structure
-    # Since 'value' is a list, we get the first item [0] and then the 'Link'
+    # Step 2: Navigate the JSON structure: value -> first item [0] -> Link
     try:
-        data_list = res_json.get('value', [])
-        if data_list and len(data_list) > 0:
-            data_url = data_list[0].get('Link')
-        else:
-            st.error("The API 'value' list is empty.")
+        # Get the 'value' list
+        value_list = res_json.get('value', [])
+        
+        if not value_list:
+            st.error("The 'value' list is empty. Check your API Key.")
             return []
-    except (IndexError, AttributeError):
-        st.error("Unexpected API response structure.")
+            
+        # Get the 'Link' string from the first item
+        data_url = value_list[0].get('Link')
+        
+        if not data_url:
+            st.error("Could not find 'Link' inside the value list.")
+            return []
+
+        # Step 3: Use the Link to download the actual JSON file
+        # This link points to the S3 bucket shown in your response
+        actual_data_res = requests.get(data_url)
+        actual_data = actual_data_res.json()
+        
+        # Step 4: Access the final list of chargers
+        # Note: Even in the downloaded file, LTA usually puts data in a 'value' key
+        return actual_data.get('value', [])
+
+    except Exception as e:
+        st.error(f"Error parsing API response: {e}")
         return []
 
-    if not data_url:
-        st.error("LTA did not return a valid download link.")
-        return []
+# Execution
+data = get_lta_data()
 
-    # Step 3: Follow the link to download the actual JSON file
-    actual_data_res = requests.get(data_url)
-    actual_data = actual_data_res.json()
+if data:
+    df = pd.DataFrame(data)
+    st.success(f"Successfully downloaded {len(df)} chargers from S3!")
     
-    # Step 4: Return the final list of chargers
-    return actual_data.get('value', [])
-
-# Temporary debug lines
-raw_data = get_lta_data()
-st.write("First item in the data:", raw_data[0] if raw_data else "Empty list")
-
-df = pd.DataFrame(raw_data)
-st.write("Columns found by Python:", df.columns.tolist())
-# End of temporary
+    # Check if Operator exists now
+    if 'Operator' in df.columns:
+        st.write("Operator column found! Ready for filtering.")
+    else:
+        st.warning(f"Operator not found. Available columns: {df.columns.tolist()}")
+        
+    st.dataframe(df.head()) # Preview the first 5 rows
 
 try:
     data = get_lta_data()
