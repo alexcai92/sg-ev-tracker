@@ -70,10 +70,6 @@ data = get_lta_data()
 if data:
     df = pd.DataFrame(data)
     st.success(f"Successfully mapped {len(df)} charging points!")
-
-# Display Data Table
-    st.subheader("Chargers Table")
-    st.dataframe(df)
     
 # Display Map
     st.subheader("Chargers Map")
@@ -118,4 +114,8 @@ if data:
     st.sidebar.markdown("### 🗺️ Map Legend")
     st.sidebar.markdown("🟠 **Orange**: DC Fast Charging")
     st.sidebar.markdown("🟢 **Green**: AC Standard Charging")
+
+# Display Data Table
+    st.subheader("Chargers Table")
+    st.dataframe(df)
 
