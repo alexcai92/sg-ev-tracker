@@ -24,9 +24,9 @@ def get_lta_data():
 # 3.2 Extract the URL from the response
 data_url = res_json.get('Link') or res_json.get('value')
     
-if not data_url or not isinstance(data_url, str):
-    st.error("Could not find a valid data link in the API response.")
-    return []
+#if not data_url or not isinstance(data_url, str):
+#    st.error("Could not find a valid data link in the API response.")
+#    return []
 
 # 3.3 Download the actual JSON file from that link
 actual_data_res = requests.get(data_url)
