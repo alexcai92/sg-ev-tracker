@@ -12,28 +12,29 @@ st.title("⚡ Singapore Live EV Charger Tracker")
 LTA_KEY = st.secrets["LTA_ACCOUNT_KEY"]
 
 # 3. Fetch Data from LTA
-# 3.1 Get the link from LTA
-@st.cache_data(ttl=300) # Refreshes every 5 minutes
+@st.cache_data(ttl=300)
 def get_lta_data():
+    # Step 1: Request the temporary download link
     url = "https://datamall2.mytransport.sg/ltaodataservice/EVCBatch"
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
     
     response = requests.get(url, headers=headers)
     res_json = response.json()
-
-    # 3.2 Extract the URL from the response
-    data_url = res_json.get('Link') or res_json.get('value')
     
-    if not data_url or not isinstance(data_url, str):
-        st.error("Could not find a valid data link in the API response.")
+    # Step 2: Extract the link from the response
+    # EVCBatch returns a dictionary like: {"Link": "https://dm-traffic...s3.amazonaws..."}
+    data_url = res_json.get('Link')
+    
+    if not data_url:
+        st.error("LTA did not return a download link. Check your API Key.")
         return []
 
-    # 3.3 Download the actual JSON file from that link
+    # Step 3: Follow the link to get the actual JSON data
     actual_data_res = requests.get(data_url)
     actual_data = actual_data_res.json()
     
-    # 3.4 Access the 'value' inside that downloaded file
-    # Most LTA JSON files still wrap the list in a 'value' key
+    # Step 4: Access the list inside the file
+    # Even in the batch file, LTA usually wraps the list in a 'value' key
     return actual_data.get('value', [])
 
 # Temporary debug lines
