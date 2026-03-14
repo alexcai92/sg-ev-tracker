@@ -18,56 +18,63 @@ def get_lta_data():
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
     
     try:
-        # Step 1: Get the Link
+        # Step 1: Get S3 Link
         res = requests.get(url, headers=headers)
-        res_json = res.json()
+        data_url = res.json()['value'][0]['Link']
         
-        # Step 2: Unpack the link carefully
-        # Based on your JSON: it's in value[0]['Link']
-        data_url = res_json['value'][0]['Link']
-        
-        # Step 3: Fetch the actual data from the S3 link
+        # Step 2: Get the actual File
         actual_res = requests.get(data_url)
-        actual_data = actual_res.json()
+        full_data = actual_res.json()
         
-        # Step 4: The final data list is usually inside 'value' in the S3 file too
-        if isinstance(actual_data, dict) and 'value' in actual_data:
-            return actual_data['value']
-        return actual_data # If it's already a list, return it
+        # Step 3: Flatten the nested data
+        flattened_rows = []
+        locations = full_data.get('evLocationsData', [])
+        
+        for loc in locations:
+            # Extract location-level info
+            base_info = {
+                "Address": loc.get('address'),
+                "Name": loc.get('name'),
+                "Latitude": loc.get('latitude'),
+                "Longitude": loc.get('longtitude'), # Note the spelling in your JSON!
+                "PostalCode": loc.get('postalCode')
+            }
+            
+            # Drill into chargingPoints
+            for cp in loc.get('chargingPoints', []):
+                # Create a copy of base info and add point-level info
+                row = base_info.copy()
+                row["Operator"] = cp.get('operator')
+                row["Status"] = cp.get('status')
+                row["Position"] = cp.get('position')
+                
+                # Optionally drill into plugTypes for price
+                plugs = cp.get('plugTypes', [])
+                if plugs:
+                    row["Price"] = plugs[0].get('price')
+                    row["Power"] = plugs[0].get('powerRating')
+                
+                flattened_rows.append(row)
+                
+        return flattened_rows
+        
     except Exception as e:
-        st.error(f"Function Error: {e}")
+        st.error(f"Error flattening data: {e}")
         return []
 
-# --- MAIN APP LOGIC ---
-raw_list = get_lta_data()
-
-if not raw_list:
-    st.error("No data found. Check your LTA_ACCOUNT_KEY in Streamlit Secrets.")
-else:
-    df = pd.DataFrame(raw_list)
-    
-    # DEBUG: This will show you exactly what the column names are
-    st.write("Columns found in your data:", df.columns.tolist())
-    
-    # Check if Operator exists (it might be 'operator' or 'Provider')
-    if 'Operator' in df.columns:
-        st.success("Operator column found!")
-        st.dataframe(df.head(5)) # This is your 5-row preview
-    else:
-        st.warning("'Operator' column missing. Look at the column list above and find the right name!")
-
-try:
-    data = get_lta_data()
+# --- Main App ---
+data = get_lta_data()
+if data:
     df = pd.DataFrame(data)
-
-    # 4. Create Sidebar Filters
-    st.sidebar.header("Filters")
-    provider = st.sidebar.multiselect("Select Provider", options=df['Operator'].unique())
+    st.success(f"Successfully mapped {len(df)} charging points!")
     
-    if provider:
-        df = df[df['Operator'].isin(provider)]
+    # Now 'Operator' exists because we manually created it in the loop above!
+    st.dataframe(df.head())
+    
+    # Update Map logic to use 'Longitude' (correcting the LTA typo 'longtitude')
+    # ... your folium code here ...
 
-    # 5. Display Map
+# 5. Display Map
     st.subheader("Charger Map")
     m = folium.Map(location=[1.3521, 103.8198], zoom_start=12)
     
