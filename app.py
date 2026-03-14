@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
+from folium.plugins import MarkerCluster
 
 # 1. Setup Page Config
 st.set_page_config(page_title="SG EV Chargers", layout="wide")
@@ -69,19 +70,32 @@ if data:
     st.success(f"Successfully mapped {len(df)} charging points!")
 
 # Display Data Table
-    st.subheader("Raw Data")
+    st.subheader("Chargers Table")
     st.dataframe(df)
     
 # Display Map
-    st.subheader("Charger Map")
+    st.subheader("Chargers Map")
+
+    # 1. Create the base map
     m = folium.Map(location=[1.3521, 103.8198], zoom_start=12)
     
+    # 2. Initialize the Cluster Layer
+    marker_cluster = MarkerCluster().add_to(m)
+    
+    # 3. Add markers to the CLUSTER instead of the MAP
     for _, row in df.iterrows():
-        folium.Marker(
-            location=[row['Latitude'], row['Longitude']],
-            popup=f"Operator: {row['Operator']}<br>Address: {row['Address']}",
-            icon=folium.Icon(color="green", icon="flash", prefix="fa")
-        ).add_to(m)
-
-    st_folium(m, width=1000, height=500)
+        # Use the spelling from your JSON ('latitude' and 'longtitude')
+        lat, lon = row['Latitude'], row['Longitude']
+        
+        if pd.notnull(lat) and pd.notnull(lon):
+            popup_text = f"<b>{row['Operator']}</b><br>{row['Address']}"
+            
+            folium.Marker(
+                location=[lat, lon],
+                popup=folium.Popup(popup_text, max_width=300),
+                icon=folium.Icon(color="green", icon="bolt", prefix="fa")
+            ).add_to(marker_cluster) # <--- Add to cluster here!
+    
+    # 4. Display the map using streamlit-folium
+    st_folium(m, width=1000, height=500, returned_objects=[])
 
