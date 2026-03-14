@@ -14,56 +14,47 @@ LTA_KEY = st.secrets["LTA_ACCOUNT_KEY"]
 # 3. Fetch Data from LTA
 @st.cache_data(ttl=300)
 def get_lta_data():
-    # Step 1: Call EVCBatch to get the temporary download link
     url = "https://datamall2.mytransport.sg/ltaodataservice/EVCBatch"
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
     
-    response = requests.get(url, headers=headers)
-    res_json = response.json()
-    
-    # Step 2: Navigate the JSON structure: value -> first item [0] -> Link
     try:
-        # Get the 'value' list
-        value_list = res_json.get('value', [])
+        # Step 1: Get the Link
+        res = requests.get(url, headers=headers)
+        res_json = res.json()
         
-        if not value_list:
-            st.error("The 'value' list is empty. Check your API Key.")
-            return []
-            
-        # Get the 'Link' string from the first item
-        data_url = value_list[0].get('Link')
+        # Step 2: Unpack the link carefully
+        # Based on your JSON: it's in value[0]['Link']
+        data_url = res_json['value'][0]['Link']
         
-        if not data_url:
-            st.error("Could not find 'Link' inside the value list.")
-            return []
-
-        # Step 3: Use the Link to download the actual JSON file
-        # This link points to the S3 bucket shown in your response
-        actual_data_res = requests.get(data_url)
-        actual_data = actual_data_res.json()
+        # Step 3: Fetch the actual data from the S3 link
+        actual_res = requests.get(data_url)
+        actual_data = actual_res.json()
         
-        # Step 4: Access the final list of chargers
-        # Note: Even in the downloaded file, LTA usually puts data in a 'value' key
-        return actual_data.get('value', [])
-
+        # Step 4: The final data list is usually inside 'value' in the S3 file too
+        if isinstance(actual_data, dict) and 'value' in actual_data:
+            return actual_data['value']
+        return actual_data # If it's already a list, return it
     except Exception as e:
-        st.error(f"Error parsing API response: {e}")
+        st.error(f"Function Error: {e}")
         return []
 
-# Execution
-data = get_lta_data()
+# --- MAIN APP LOGIC ---
+raw_list = get_lta_data()
 
-if data:
-    df = pd.DataFrame(data)
-    st.success(f"Successfully downloaded {len(df)} chargers from S3!")
+if not raw_list:
+    st.error("No data found. Check your LTA_ACCOUNT_KEY in Streamlit Secrets.")
+else:
+    df = pd.DataFrame(raw_list)
     
-    # Check if Operator exists now
+    # DEBUG: This will show you exactly what the column names are
+    st.write("Columns found in your data:", df.columns.tolist())
+    
+    # Check if Operator exists (it might be 'operator' or 'Provider')
     if 'Operator' in df.columns:
-        st.write("Operator column found! Ready for filtering.")
+        st.success("Operator column found!")
+        st.dataframe(df.head(5)) # This is your 5-row preview
     else:
-        st.warning(f"Operator not found. Available columns: {df.columns.tolist()}")
-        
-    st.dataframe(df.head()) # Preview the first 5 rows
+        st.warning("'Operator' column missing. Look at the column list above and find the right name!")
 
 try:
     data = get_lta_data()
