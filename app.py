@@ -54,6 +54,8 @@ def get_lta_data():
                 if plugs:
                     row["Price"] = plugs[0].get('price')
                     row["Power"] = plugs[0].get('powerRating')
+                    row["PowerType"] = plugs[0].get('current') # Captures 'AC' or 'DC'
+                    row["PowerRating"] = plugs[0].get('powerRating')
                 
                 flattened_rows.append(row)
                 
@@ -81,21 +83,39 @@ if data:
     
     # 2. Initialize the Cluster Layer
     marker_cluster = MarkerCluster().add_to(m)
+
+    # Helper function for colors
+    def get_marker_color(power_type):
+        if power_type == "DC":
+            return "orange" # Fast Charger
+        return "green"      # Standard AC Charger
     
     # 3. Add markers to the CLUSTER instead of the MAP
     for _, row in df.iterrows():
         # Use the spelling from your JSON ('latitude' and 'longtitude')
         lat, lon = row['Latitude'], row['Longitude']
+        p_type = row.get('PowerType', 'AC')
+        p_rating = row.get('PowerRating', 'Unknown')
         
         if pd.notnull(lat) and pd.notnull(lon):
-            popup_text = f"<b>{row['Operator']}</b><br>{row['Address']}"
+            color = get_marker_color(p_type)
+            
+            popup_text = f"""
+            <b>{row['Operator']}</b><br>
+            {row['Address']}<br>
+            <b>Type:</b> {p_type} ({p_rating}kW)
+            """
             
             folium.Marker(
                 location=[lat, lon],
                 popup=folium.Popup(popup_text, max_width=300),
-                icon=folium.Icon(color="green", icon="bolt", prefix="fa")
+                icon=folium.Icon(color=color, icon="bolt", prefix="fa") #icon='flash'
             ).add_to(marker_cluster) # <--- Add to cluster here!
     
     # 4. Display the map using streamlit-folium
     st_folium(m, width=1000, height=500, returned_objects=[])
+    
+    st.sidebar.markdown("### 🗺️ Map Legend")
+    st.sidebar.markdown("🟠 **Orange**: DC Fast Charging")
+    st.sidebar.markdown("🟢 **Green**: AC Standard Charging")
 
