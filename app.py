@@ -12,14 +12,29 @@ st.title("⚡ Singapore Live EV Charger Tracker")
 LTA_KEY = st.secrets["LTA_ACCOUNT_KEY"]
 
 # 3. Fetch Data from LTA
+# 3.1 Get the link from LTA
 @st.cache_data(ttl=300) # Refreshes every 5 minutes
 def get_lta_data():
     url = "https://datamall2.mytransport.sg/ltaodataservice/EVCBatch"
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
+    
     response = requests.get(url, headers=headers)
+    res_json = response.json()
 
-    raw_json = response.json()
-    return raw_json['value']
+# 3.2 Extract the URL from the response
+data_url = res_json.get('Link') or res_json.get('value')
+    
+    if not data_url or not isinstance(data_url, str):
+        st.error("Could not find a valid data link in the API response.")
+        return []
+
+# 3.3 Download the actual JSON file from that link
+actual_data_res = requests.get(data_url)
+actual_data = actual_data_res.json()
+    
+# 3.4 Access the 'value' inside that downloaded file
+# Most LTA JSON files still wrap the list in a 'value' key
+return actual_data.get('value', [])
 
 # Temporary debug lines
 raw_data = get_lta_data()
