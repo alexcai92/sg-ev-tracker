@@ -14,7 +14,7 @@ LTA_KEY = st.secrets["LTA_ACCOUNT_KEY"]
 # 3. Fetch Data from LTA
 @st.cache_data(ttl=300) # Refreshes every 5 minutes
 def get_lta_data():
-    url = "https://datamall2.mytransport.sg/ltaodataservice/EVChargingStations"
+    url = "https://datamall2.mytransport.sg/ltaodataservice/EVChargingPoints"
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
     response = requests.get(url, headers=headers)
     return response.json()['value']
