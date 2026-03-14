@@ -17,7 +17,17 @@ def get_lta_data():
     url = "https://datamall2.mytransport.sg/ltaodataservice/EVCBatch"
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
     response = requests.get(url, headers=headers)
-    return response.json()['value']
+
+    raw_json = response.json()
+    return raw_json['value']
+
+# Temporary debug lines
+raw_data = get_lta_data()
+st.write("First item in the data:", raw_data[0] if raw_data else "Empty list")
+
+df = pd.DataFrame(raw_data)
+st.write("Columns found by Python:", df.columns.tolist())
+# End of temporary
 
 try:
     data = get_lta_data()
