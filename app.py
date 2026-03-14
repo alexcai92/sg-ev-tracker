@@ -21,20 +21,28 @@ def get_lta_data():
     response = requests.get(url, headers=headers)
     res_json = response.json()
     
-    # Step 2: Extract the link from the response
-    # EVCBatch returns a dictionary like: {"Link": "https://dm-traffic...s3.amazonaws..."}
-    data_url = res_json.get('Link')
-    
-    if not data_url:
-        st.error("LTA did not return a download link. Check your API Key.")
+    # Step 2: Extract the link from the nested structure
+    # Since 'value' is a list, we get the first item [0] and then the 'Link'
+    try:
+        data_list = res_json.get('value', [])
+        if data_list and len(data_list) > 0:
+            data_url = data_list[0].get('Link')
+        else:
+            st.error("The API 'value' list is empty.")
+            return []
+    except (IndexError, AttributeError):
+        st.error("Unexpected API response structure.")
         return []
 
-    # Step 3: Follow the link to get the actual JSON data
+    if not data_url:
+        st.error("LTA did not return a valid download link.")
+        return []
+
+    # Step 3: Follow the link to download the actual JSON file
     actual_data_res = requests.get(data_url)
     actual_data = actual_data_res.json()
     
-    # Step 4: Access the list inside the file
-    # Even in the batch file, LTA usually wraps the list in a 'value' key
+    # Step 4: Return the final list of chargers
     return actual_data.get('value', [])
 
 # Temporary debug lines
