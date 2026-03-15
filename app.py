@@ -121,4 +121,3 @@ if data:
 # Display Data Table
     st.subheader("Chargers Table")
     st.dataframe(df)
-
