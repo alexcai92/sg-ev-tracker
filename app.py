@@ -4,6 +4,20 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
+import google.generativeai as genai
+import json
+from math import radians, cos, sin, asin, sqrt
+
+# --- 1. Setup & Secrets ---
+st.set_page_config(page_title="SG EV Chargers", layout="wide")
+
+# Securely get API Keys from Streamlit Secrets
+LTA_KEY = st.secrets["LTA_ACCOUNT_KEY"]
+if "GEMINI_API_KEY" in st.secrets:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    model = genai.GenerativeModel('gemini-1.5-flash')
+else:
+    st.error("Please add GEMINI_API_KEY to your secrets.")
 
 # Define App Links
 APP_LINKS = {
@@ -33,193 +47,180 @@ APP_LINKS = {
     }
 }
 
-# 1. Setup Page Config
-st.set_page_config(page_title="SG EV Chargers", layout="wide")
-st.title("⚡ Singapore EV Chargers Live Status")
+# Simple landmark library for coordinates
+LANDMARKS = {
+    "suntec city": (1.2935, 103.8576),
+    "orchard road": (1.3048, 103.8318),
+    "vivocity": (1.2646, 103.8202),
+    "changi airport": (1.3644, 103.9915),
+    "jurong east": (1.3329, 103.7436)
+}
 
-# 2. Securely get your API Key
-LTA_KEY = st.secrets["LTA_ACCOUNT_KEY"]
+# --- 2. Helper Functions ---
 
-# 3. Fetch Data from LTA
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371 # Earth radius in km
+    dLat, dLon = radians(lat2 - lat1), radians(lon2 - lon1)
+    a = sin(dLat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dLon/2)**2
+    return R * 2 * asin(sqrt(a))
+
 @st.cache_data(ttl=300)
 def get_lta_data():
     url = "https://datamall2.mytransport.sg/ltaodataservice/EVCBatch"
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
-    
     try:
-        # Step 1: Get S3 Link
         res = requests.get(url, headers=headers)
-        data_url = res.json()['value'][0]['Link']
+        data_url = res.json()['value'][0]['Link'] #
+        full_data = requests.get(data_url).json()
         
-        # Step 2: Get the actual File
-        actual_res = requests.get(data_url)
-        full_data = actual_res.json()
-        
-        # Step 3: Flatten the nested data
         flattened_rows = []
-        locations = full_data.get('evLocationsData', [])
-        update_timestamp = full_data.get('LastUpdatedTime', 'Unknown')
+        locations = full_data.get('evLocationsData', []) #
+        update_timestamp = full_data.get('LastUpdatedTime', 'Unknown') #
         
         for loc in locations:
-            # Extract location-level info
             base_info = {
                 "Address": loc.get('address'),
                 "Name": loc.get('name'),
                 "Latitude": loc.get('latitude'),
-                "Longitude": loc.get('longtitude'), # Note the spelling in your JSON!
+                "Longitude": loc.get('longtitude'),
                 "PostalCode": loc.get('postalCode')
             }
-            
-            # Drill into chargingPoints
             for cp in loc.get('chargingPoints', []):
-                # Create a copy of base info and add point-level info
                 row = base_info.copy()
                 row["Operator"] = cp.get('operator')
                 row["Status"] = cp.get('status')
                 row["Position"] = cp.get('position')
-                
-                # Optionally drill into plugTypes for price
                 plugs = cp.get('plugTypes', [])
                 if plugs:
                     row["Price"] = plugs[0].get('price')
-                    row["Power"] = plugs[0].get('powerRating')
-                    row["PowerType"] = plugs[0].get('current') # Captures 'AC' or 'DC'
+                    row["PowerType"] = plugs[0].get('current')
                     row["PowerRating"] = plugs[0].get('powerRating')
-                
                 flattened_rows.append(row)
-                
         return flattened_rows, update_timestamp
-        
     except Exception as e:
-        st.error(f"Error flattening data: {e}")
+        st.error(f"Error fetching data: {e}")
         return [], "Unknown"
 
-# --- Main App ---
+# --- 3. Sidebar UI (Cost Calculator) ---
+st.sidebar.markdown("### 💰 Cost Calculator")
+est_kwh = st.sidebar.number_input("Estimated Energy (kWh):", min_value=0.0, value=20.0, step=1.0)
+park_type = st.sidebar.radio("Parking Fee Type:", ["Per Hour", "Fixed Fee"])
+park_value = st.sidebar.number_input(f"Enter {park_type} (S$):", min_value=0.0, value=1.20 if park_type == "Per Hour" else 5.00)
+duration_str = st.sidebar.text_input("Parking Duration (hh:mm):", value="01:00")
+
+try:
+    hours, minutes = map(int, duration_str.split(':'))
+    total_hours = hours + (minutes / 60.0)
+except ValueError:
+    st.sidebar.error("Use hh:mm format (e.g. 01:30)")
+    total_hours = 1.0
+
+# --- 4. Main App Logic ---
+st.title("⚡ Singapore EV Chargers Live Status")
 data, update_timestamp = get_lta_data()
+
 if data:
     df = pd.DataFrame(data)
-    st.success(f"Successfully mapped {len(df)} charging points!")
     
-# Display Map
-    st.subheader("⚡ Charger Map")
-    st.info("INSTRUCTIONS: Input estimated energy (kWh) and parking duration in the sidebar to see estimated costs for each charger. Click on markers to zoom-in for details.")
-    st.caption(f"Data is refreshed every 5 minutes from the LTA DataMall EVCBatch API. Last Updated on **{update_timestamp}**. Allow some time for initial loading of data.")
-
-    # 1. Create the base map
-    m = folium.Map(location=[1.3521, 103.8198], zoom_start=12)
-    
-    # 2. Initialize the Cluster Layer
-    marker_cluster = MarkerCluster().add_to(m)
-    
-    # 3. Add markers to the CLUSTER instead of the MAP
-    # --- STEP 1: GROUP BY NAME AND POWER TYPE ---
-    # We group by both so AC and DC points at the same mall are handled separately
+    # Grouping logic to only draw one pin per location/power type
     grouped_df = df.groupby(['Name', 'PowerType']).agg({
-        'Address': 'first',
-        'Latitude': 'first',
-        'Longitude': 'first',
-        'Operator': 'first',
-        'PowerRating': 'first',
-        'Price': 'first',
-        'Position': 'first',
-        'Status': lambda x: list(x)
+        'Address': 'first', 'Latitude': 'first', 'Longitude': 'first',
+        'Operator': 'first', 'PowerRating': 'first', 'Price': 'first',
+        'Position': 'first', 'Status': lambda x: list(x)
     }).reset_index()
 
-    # --- STEP 1A: ADD COST CALCULATOR IN SIDEBAR ---
-    st.sidebar.markdown("### 💰 Cost Calculator")
+    st.subheader("⚡ Charger Map")
+    st.caption(f"Data refreshed every 5 mins. Last Updated: **{update_timestamp}**.")
 
-    # kWh Input
-    est_kwh = st.sidebar.number_input("Estimated Energy (kWh):", min_value=0.0, value=20.0, step=1.0)
+    m = folium.Map(location=[1.3521, 103.8198], zoom_start=12)
+    marker_cluster = MarkerCluster().add_to(m)
 
-    # Parking Fee Type
-    park_type = st.sidebar.radio("Parking Fee Type:", ["Per Hour", "Fixed Fee"])
-    park_value = st.sidebar.number_input(f"Enter {park_type} (S$):", min_value=0.0, value=1.20 if park_type == "Per Hour" else 5.00)
-
-    # Duration Input in hh:mm
-    duration_str = st.sidebar.text_input("Parking Duration (hh:mm):", value="01:00")
-
-    # --- CONVERT HH:MM TO TOTAL HOURS ---
-    try:
-        hours, minutes = map(int, duration_str.split(':'))
-        total_hours = hours + (minutes / 60.0)
-    except ValueError:
-        st.sidebar.error("Please use hh:mm format (e.g. 01:30)")
-        total_hours = 1.0 # Fallback
-
-    # --- STEP 2: DRAW PINS ---
     for _, row in grouped_df.iterrows():
         lat, lon = row['Latitude'], row['Longitude']
-        p_type = row['PowerType']
-        p_rating = row.get('PowerRating', 'N/A')
-        
-        # Calculate availability for this specific group (e.g., all DC points at Mall X)
         statuses = row['Status']
-        total_points = len(statuses)
         available_points = statuses.count("1")
+        total_points = len(statuses)
         
-        # Use your existing color logic: Orange for DC, Green for AC
-        # But we change to Red if 0 chargers are available in that group
-        if available_points == 0:
-            marker_color = "red"
-        else:
-            marker_color = "orange" if p_type == "DC" else "green"
+        # Color Logic
+        if available_points == 0: marker_color = "red"
+        else: marker_color = "orange" if row['PowerType'] == "DC" else "green"
 
-        # --- STEP 1: CALCULATE PARKING COST ---
-        if park_type == "Per Hour":
-            parking_cost = park_value * total_hours
-        else:
-            parking_cost = park_value # Fixed fee
+        # Cost Calculations
+        parking_cost = park_value * total_hours if park_type == "Per Hour" else park_value
+        try: price_val = float(row.get('Price', 0))
+        except: price_val = 0.0
+        total_cost = parking_cost + (price_val * est_kwh)
 
-        # --- STEP 2: CALCULATE CHARGING COST ---
-        # Ensure Price is a number; LTA sometimes sends empty strings or N/A
-        try:
-            price_val = float(row.get('Price', 0))
-        except (ValueError, TypeError):
-            price_val = 0.0
+        # Operator Hyperlinks
+        display_op = row['Operator']
+        if display_op in APP_LINKS:
+            links = APP_LINKS[display_op]
+            display_op += f" (<a href='{links['ios']}' target='_blank'>iOS</a> / <a href='{links['android']}' target='_blank'>Android</a>)"
 
-        charging_cost = price_val * est_kwh
-
-        # --- STEP 3: TOTAL COST ---
-        total_cost = parking_cost + charging_cost
-
-        # --- LOGIC FOR HYPERLINKED OPERATOR ---
-        raw_op = row['Operator']
-        display_op = raw_op
-        if raw_op in APP_LINKS:
-            ios_url = APP_LINKS[raw_op]['ios']
-            android_url = APP_LINKS[raw_op]['android']
-            display_op = f"{raw_op} (<a href='{ios_url}' target='_blank'>iOS</a> / <a href='{android_url}' target='_blank'>Android</a>)"
-
-        # --- UPDATED POPUP TEXT ---
         if pd.notnull(lat) and pd.notnull(lon):
-            popup_text = f"""
-            <b>{row['Name']}</b><br>
-            {row['Address']}<br>
-            <b>Operator:</b> {display_op}<br>
-            <hr>
-            <b>Type:</b> {p_type} ({row.get('PowerRating', 'N/A')}kW)<br>
+            popup_html = f"""
+            <b>{row['Name']}</b><br>{row['Address']}<br>
+            <b>Operator:</b> {display_op}<br><hr>
+            <b>Type:</b> {row['PowerType']} ({row.get('PowerRating', 'N/A')}kW)<br>
             <b>Price:</b> S$ {price_val:.4f} /kWh<br>
-            <br>
-            <div style="background-color: #f9f9f9; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+            <div style="background-color: #f9f9f9; padding: 8px; border-radius: 5px; border: 1px solid #ddd;">
                 <b>Total Est. Cost: S$ {total_cost:.2f}</b><br>
-                <small>
-                    - Charge: ${charging_cost:.2f} ({est_kwh}kWh)<br>
-                    - Parking: ${parking_cost:.2f} ({duration_str})
-                </small>
-            </div>
-            <hr>
-            <b>Available {p_type} Points: {available_points}/{total_points}</b>
+                <small>Charge: ${price_val*est_kwh:.2f} | Park: ${parking_cost:.2f}</small>
+            </div><hr>
+            <b>Available: {available_points}/{total_points}</b>
             """
-            
-            folium.Marker(
-                location=[lat, lon],
-                popup=folium.Popup(popup_text, max_width=300),
-                icon=folium.Icon(color=marker_color, icon="bolt", prefix="fa")
-            ).add_to(marker_cluster)
+            folium.Marker([lat, lon], popup=folium.Popup(popup_html, max_width=300),
+                          icon=folium.Icon(color=marker_color, icon="bolt", prefix="fa")).add_to(marker_cluster)
 
-    # 4. Display the map using streamlit-folium
     st_folium(m, width=1000, height=500, returned_objects=[])
 
-# Display Data Table
+    # --- 5. AI Chatbot Assistant ---
+    st.divider()
+    st.subheader("💬 EV Assistant")
+    
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if query := st.chat_input("Ask: 'Where is the cheapest charger near Suntec City?'"):
+        st.session_state.messages.append({"role": "user", "content": query})
+        with st.chat_message("user"):
+            st.markdown(query)
+
+        with st.chat_message("assistant"):
+            # Intent Parsing
+            intent_prompt = f"""Return ONLY JSON for query: '{query}'. 
+            Keys: 'landmark' (string or null), 'kwh' (number, default {est_kwh}), 'hours' (number, default {total_hours})."""
+            ai_res = model.generate_content(intent_prompt).text
+            
+            try:
+                intent = json.loads(ai_res.strip())
+                ref_lat, ref_lon = LANDMARKS.get(intent.get('landmark', '').lower(), (1.3521, 103.8198))
+                
+                # Calculate costs for comparison
+                chat_results = []
+                for _, r in grouped_df.iterrows():
+                    dist = haversine(ref_lat, ref_lon, r['Latitude'], r['Longitude'])
+                    p_cost = park_value * intent['hours'] if park_type == "Per Hour" else park_value
+                    try: pr = float(r.get('Price', 0))
+                    except: pr = 0.0
+                    total = p_cost + (pr * intent['kwh'])
+                    chat_results.append({"Name": r['Name'], "Total": total, "Dist": dist})
+                
+                # Filter by distance (5km) and sort by Total Cost
+                top = sorted([res for res in chat_results if res['Dist'] < 5], key=lambda x: x['Total'])[:3]
+                
+                response = f"Cheapest options near {intent.get('landmark', 'your area')}:\n"
+                for i, c in enumerate(top, 1):
+                    response += f"{i}. **{c['Name']}** - S${c['Total']:.2f} (Total) | {c['Dist']:.1f}km away\n"
+            except:
+                response = "I couldn't calculate that. Please specify a landmark like Suntec City or Orchard Road."
+            
+            st.markdown(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+
     st.subheader("Chargers Table")
     st.dataframe(df)
