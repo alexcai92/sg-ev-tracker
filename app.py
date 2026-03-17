@@ -110,42 +110,48 @@ if data:
     
     # 2. Initialize the Cluster Layer
     marker_cluster = MarkerCluster().add_to(m)
-
-    # Helper function for colors
-    def get_marker_color(power_type):
-        if power_type == "DC":
-            return "orange" # Fast Charger
-        return "green"      # Standard AC Charger
     
     # 3. Add markers to the CLUSTER instead of the MAP
-    for _, row in df.iterrows():
+    # --- STEP 1: GROUP BY NAME AND POWER TYPE ---
+    # We group by both so AC and DC points at the same mall are handled separately
+    grouped_df = df.groupby(['Name', 'PowerType']).agg({
+        'Address': 'first',
+        'Latitude': 'first',
+        'Longitude': 'first',
+        'Operator': 'first',
+        'PowerRating': 'first',
+        'Price': 'first',
+        'Position': 'first',
+        'Status': lambda x: list(x)
+    }).reset_index()
+
+    # --- STEP 2: DRAW PINS ---
+    for _, row in grouped_df.iterrows():
         lat, lon = row['Latitude'], row['Longitude']
-        p_type = row.get('PowerType', 'AC')
-        p_rating = row.get('PowerRating', 'Unknown')
+        p_type = row['PowerType']
+        p_rating = row.get('PowerRating', 'N/A')
         
-        # Status Mapping Logic
-        status_raw = str(row.get('Status', ''))
-        if status_raw == "1":
-            status_text = "Available"
-        elif status_raw == "0":
-            status_text = "Occupied"
+        # Calculate availability for this specific group (e.g., all DC points at Mall X)
+        statuses = row['Status']
+        total_points = len(statuses)
+        available_points = statuses.count("1")
+        
+        # Use your existing color logic: Orange for DC, Green for AC
+        # But we change to Red if 0 chargers are available in that group
+        if available_points == 0:
+            marker_color = "red"
         else:
-            status_text = "Not Available/Faulty"
+            marker_color = "orange" if p_type == "DC" else "green"
 
         # --- LOGIC FOR HYPERLINKED OPERATOR ---
         raw_op = row['Operator']
-        display_op = raw_op # Default if not in our list
-
+        display_op = raw_op
         if raw_op in APP_LINKS:
             ios_url = APP_LINKS[raw_op]['ios']
             android_url = APP_LINKS[raw_op]['android']
-            # Create the hyperlinked version: Name (<a href='ios'>iOS</a> / <a href='android'>Android</a>)
             display_op = f"{raw_op} (<a href='{ios_url}' target='_blank'>iOS</a> / <a href='{android_url}' target='_blank'>Android</a>)"
 
         if pd.notnull(lat) and pd.notnull(lon):
-            color = get_marker_color(p_type)
-            
-            # --- UPDATED POPUP TEXT ---
             popup_text = f"""
             <b>{row['Name']}</b><br>
             {row['Address']}<br>
@@ -153,22 +159,18 @@ if data:
             <b>Type:</b> {p_type} ({p_rating}kW)<br>
             <b>Price:</b> S$ {row.get('Price', 'N/A')} /kWh<br>
             <b>Location:</b> {row.get('Position', 'N/A')}<br>
-            <br>
-            <b>Status:</b> {status_text}
+            <hr>
+            <b>Available {p_type} Points: {available_points}/{total_points}</b>
             """
             
             folium.Marker(
                 location=[lat, lon],
                 popup=folium.Popup(popup_text, max_width=300),
-                icon=folium.Icon(color=color, icon="bolt", prefix="fa")
+                icon=folium.Icon(color=marker_color, icon="bolt", prefix="fa")
             ).add_to(marker_cluster)
-    
+
     # 4. Display the map using streamlit-folium
     st_folium(m, width=1000, height=500, returned_objects=[])
-    
-    st.sidebar.markdown("### 🗺️ Map Legend")
-    st.sidebar.markdown("🟠 **Orange**: DC Fast Charging")
-    st.sidebar.markdown("🟢 **Green**: AC Standard Charging")
 
 # Display Data Table
     st.subheader("Chargers Table")
