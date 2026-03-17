@@ -64,7 +64,7 @@ def get_lta_data():
         
     except Exception as e:
         st.error(f"Error flattening data: {e}")
-        return []
+        return [], "Unknown"
 
 # --- Main App ---
 data, update_timestamp = get_lta_data()
@@ -75,7 +75,7 @@ if data:
 # Display Map
     st.subheader("⚡ Charger Map")
     st.info("Pro-tip: Markers are clustered for speed. Double-click a cluster to zoom into that neighborhood.")
-    st.caption("Data is refreshed every 5 minutes from the LTA DataMall EVCBatch API. Last Updated on **{update_timestamp}**. Allow some time for initial loading of data.")
+    st.caption(f"Data is refreshed every 5 minutes from the LTA DataMall EVCBatch API. Last Updated on **{update_timestamp}**. Allow some time for initial loading of data.")
 
     # 1. Create the base map
     m = folium.Map(location=[1.3521, 103.8198], zoom_start=12)
