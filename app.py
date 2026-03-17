@@ -102,7 +102,7 @@ if data:
     
 # Display Map
     st.subheader("⚡ Charger Map")
-    st.info("Pro-tip: Markers are clustered for speed. Double-click a cluster to zoom into that neighborhood.")
+    st.info("INSTRUCTIONS: Input estimated energy (kWh) and parking duration in the sidebar to see estimated costs for each charger. Click on markers to zoom-in for details.")
     st.caption(f"Data is refreshed every 5 minutes from the LTA DataMall EVCBatch API. Last Updated on **{update_timestamp}**. Allow some time for initial loading of data.")
 
     # 1. Create the base map
