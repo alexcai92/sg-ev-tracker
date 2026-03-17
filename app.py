@@ -5,6 +5,34 @@ import folium
 from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
 
+# Define App Links
+APP_LINKS = {
+    "SP MOBILITY PTE. LTD.": {
+        "ios": "https://apps.apple.com/sg/app/sp-utilities-ev-charging/id596749130",
+        "android": "https://play.google.com/store/apps/details?id=sg.com.singaporepower.spservices"
+    },
+    "COMFORTDELGRO ENGIE PTE. LTD.": {
+        "ios": "https://apps.apple.com/sg/app/cdg-engie/id1604169726",
+        "android": "https://play.google.com/store/apps/details?id=com.cdgengiepilot.evc"
+    },
+    "SHELL SINGAPORE PTE. LTD.": {
+        "ios": "https://apps.apple.com/sg/app/shell-recharge-asia/id6458189524",
+        "android": "https://play.google.com/store/apps/details?id=com.zecosystems.shellrechargeasia"
+    },
+    "CHARGE+ PTE. LTD.": {
+        "ios": "https://apps.apple.com/sg/app/charge/id1481750244",
+        "android": "https://play.google.com/store/apps/details?id=com.chargeplus.chargeapp"
+    },
+    "STRIDES YTL PTE. LTD.": {
+        "ios": "https://apps.apple.com/sg/app/chargeco/id1664718768",
+        "android": "https://play.google.com/store/apps/details?id=com.strides.chargeco"
+    },
+    "VOLT SINGAPORE PTE. LTD.": {
+        "ios": "https://apps.apple.com/sg/app/volt-ev-charging/id1606309147",
+        "android": "https://play.google.com/store/apps/details?id=com.evvolt.voltapp"
+    }
+}
+
 # 1. Setup Page Config
 st.set_page_config(page_title="SG EV Chargers", layout="wide")
 st.title("⚡ Singapore EV Chargers Live Status")
@@ -104,14 +132,24 @@ if data:
         else:
             status_text = "Not Available/Faulty"
 
+        # --- LOGIC FOR HYPERLINKED OPERATOR ---
+        raw_op = row['Operator']
+        display_op = raw_op # Default if not in our list
+
+        if raw_op in APP_LINKS:
+            ios_url = APP_LINKS[raw_op]['ios']
+            android_url = APP_LINKS[raw_op]['android']
+            # Create the hyperlinked version: Name (<a href='ios'>iOS</a> / <a href='android'>Android</a>)
+            display_op = f"{raw_op} (<a href='{ios_url}' target='_blank'>iOS</a> / <a href='{android_url}' target='_blank'>Android</a>)"
+
         if pd.notnull(lat) and pd.notnull(lon):
             color = get_marker_color(p_type)
             
-            # Updated popup_text with your specific requirements
+            # --- UPDATED POPUP TEXT ---
             popup_text = f"""
             <b>{row['Name']}</b><br>
             {row['Address']}<br>
-            <b>Operator:</b> {row['Operator']}<br>
+            <b>Operator:</b> {display_op}<br>
             <b>Type:</b> {p_type} ({p_rating}kW)<br>
             <b>Price:</b> S$ {row.get('Price', 'N/A')} /kWh<br>
             <b>Location:</b> {row.get('Position', 'N/A')}<br>
