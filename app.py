@@ -125,6 +125,27 @@ if data:
         'Status': lambda x: list(x)
     }).reset_index()
 
+    # --- STEP 1A: ADD COST CALCULATOR IN SIDEBAR ---
+    st.sidebar.markdown("### 💰 Cost Calculator")
+
+    # kWh Input
+    est_kwh = st.sidebar.number_input("Estimated Energy (kWh):", min_value=0.0, value=20.0, step=1.0)
+
+    # Parking Fee Type
+    park_type = st.sidebar.radio("Parking Fee Type:", ["Per Hour", "Fixed Fee"])
+    park_value = st.sidebar.number_input(f"Enter {park_type} (S$):", min_value=0.0, value=1.20 if park_type == "Per Hour" else 5.00)
+
+    # Duration Input in hh:mm
+    duration_str = st.sidebar.text_input("Parking Duration (hh:mm):", value="01:00")
+
+    # --- CONVERT HH:MM TO TOTAL HOURS ---
+    try:
+        hours, minutes = map(int, duration_str.split(':'))
+        total_hours = hours + (minutes / 60.0)
+    except ValueError:
+        st.sidebar.error("Please use hh:mm format (e.g. 01:30)")
+        total_hours = 1.0 # Fallback
+
     # --- STEP 2: DRAW PINS ---
     for _, row in grouped_df.iterrows():
         lat, lon = row['Latitude'], row['Longitude']
@@ -143,6 +164,24 @@ if data:
         else:
             marker_color = "orange" if p_type == "DC" else "green"
 
+        # --- STEP 1: CALCULATE PARKING COST ---
+        if park_type == "Per Hour":
+            parking_cost = park_value * total_hours
+        else:
+            parking_cost = park_value # Fixed fee
+
+        # --- STEP 2: CALCULATE CHARGING COST ---
+        # Ensure Price is a number; LTA sometimes sends empty strings or N/A
+        try:
+            price_val = float(row.get('Price', 0))
+        except (ValueError, TypeError):
+            price_val = 0.0
+
+        charging_cost = price_val * est_kwh
+
+        # --- STEP 3: TOTAL COST ---
+        total_cost = parking_cost + charging_cost
+
         # --- LOGIC FOR HYPERLINKED OPERATOR ---
         raw_op = row['Operator']
         display_op = raw_op
@@ -151,14 +190,23 @@ if data:
             android_url = APP_LINKS[raw_op]['android']
             display_op = f"{raw_op} (<a href='{ios_url}' target='_blank'>iOS</a> / <a href='{android_url}' target='_blank'>Android</a>)"
 
+        # --- UPDATED POPUP TEXT ---
         if pd.notnull(lat) and pd.notnull(lon):
             popup_text = f"""
             <b>{row['Name']}</b><br>
             {row['Address']}<br>
             <b>Operator:</b> {display_op}<br>
-            <b>Type:</b> {p_type} ({p_rating}kW)<br>
-            <b>Price:</b> S$ {row.get('Price', 'N/A')} /kWh<br>
-            <b>Location:</b> {row.get('Position', 'N/A')}<br>
+            <hr>
+            <b>Type:</b> {p_type} ({row.get('PowerRating', 'N/A')}kW)<br>
+            <b>Price:</b> S$ {price_val:.4f} /kWh<br>
+            <br>
+            <div style="background-color: #f9f9f9; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                <b>Total Est. Cost: S$ {total_cost:.2f}</b><br>
+                <small>
+                    - Charge: ${charging_cost:.2f} ({est_kwh}kWh)<br>
+                    - Parking: ${parking_cost:.2f} ({duration_str})
+                </small>
+            </div>
             <hr>
             <b>Available {p_type} Points: {available_points}/{total_points}</b>
             """
