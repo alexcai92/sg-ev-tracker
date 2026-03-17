@@ -91,25 +91,39 @@ if data:
     
     # 3. Add markers to the CLUSTER instead of the MAP
     for _, row in df.iterrows():
-        # Use the spelling from your JSON ('latitude' and 'longtitude')
         lat, lon = row['Latitude'], row['Longitude']
         p_type = row.get('PowerType', 'AC')
         p_rating = row.get('PowerRating', 'Unknown')
         
+        # Status Mapping Logic
+        status_raw = str(row.get('Status', ''))
+        if status_raw == "1":
+            status_text = "Available"
+        elif status_raw == "0":
+            status_text = "Occupied"
+        else:
+            status_text = "Not Available/Faulty"
+
         if pd.notnull(lat) and pd.notnull(lon):
             color = get_marker_color(p_type)
             
+            # Updated popup_text with your specific requirements
             popup_text = f"""
-            <b>{row['Operator']}</b><br>
+            <b>{row['Name']}</b><br>
             {row['Address']}<br>
-            <b>Type:</b> {p_type} ({p_rating}kW)
+            <b>Operator:</b> {row['Operator']}<br>
+            <b>Type:</b> {p_type} ({p_rating}kW)<br>
+            <b>Price:</b> S$ {row.get('Price', 'N/A')} /kWh<br>
+            <b>Location:</b> {row.get('Position', 'N/A')}<br>
+            <br>
+            <b>Status:</b> {status_text}
             """
             
             folium.Marker(
                 location=[lat, lon],
                 popup=folium.Popup(popup_text, max_width=300),
-                icon=folium.Icon(color=color, icon="bolt", prefix="fa") #icon='flash'
-            ).add_to(marker_cluster) # <--- Add to cluster here!
+                icon=folium.Icon(color=color, icon="bolt", prefix="fa")
+            ).add_to(marker_cluster)
     
     # 4. Display the map using streamlit-folium
     st_folium(m, width=1000, height=500, returned_objects=[])
