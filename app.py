@@ -4,20 +4,13 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
-import google.generativeai as genai
-import json
-from math import radians, cos, sin, asin, sqrt
 
-# --- 1. Setup & Secrets ---
+# --- 1. Setup Page Config ---
 st.set_page_config(page_title="SG EV Chargers", layout="wide")
+st.title("⚡ Singapore EV Chargers Live Status")
 
-# Securely get API Keys from Streamlit Secrets
+# Securely get LTA API Key
 LTA_KEY = st.secrets["LTA_ACCOUNT_KEY"]
-if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('gemini-2.5-flash')
-else:
-    st.error("Please add GEMINI_API_KEY to your secrets.")
 
 # Define App Links
 APP_LINKS = {
@@ -47,35 +40,24 @@ APP_LINKS = {
     }
 }
 
-# Simple landmark library for coordinates
-LANDMARKS = {
-    "suntec city": (1.2935, 103.8576),
-    "orchard road": (1.3048, 103.8318),
-    "vivocity": (1.2646, 103.8202),
-    "changi airport": (1.3644, 103.9915),
-    "jurong east": (1.3329, 103.7436)
-}
-
 # --- 2. Helper Functions ---
-
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371 # Earth radius in km
-    dLat, dLon = radians(lat2 - lat1), radians(lon2 - lon1)
-    a = sin(dLat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dLon/2)**2
-    return R * 2 * asin(sqrt(a))
 
 @st.cache_data(ttl=300)
 def get_lta_data():
     url = "https://datamall2.mytransport.sg/ltaodataservice/EVCBatch"
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
     try:
+        # Step 1: Get S3 Link
         res = requests.get(url, headers=headers)
-        data_url = res.json()['value'][0]['Link'] #
+        data_url = res.json()['value'][0]['Link']
+        
+        # Step 2: Get the actual File
         full_data = requests.get(data_url).json()
         
+        # Step 3: Flatten the nested data
         flattened_rows = []
-        locations = full_data.get('evLocationsData', []) #
-        update_timestamp = full_data.get('LastUpdatedTime', 'Unknown') #
+        locations = full_data.get('evLocationsData', [])
+        update_timestamp = full_data.get('LastUpdatedTime', 'Unknown')
         
         for loc in locations:
             base_info = {
@@ -116,13 +98,12 @@ except ValueError:
     total_hours = 1.0
 
 # --- 4. Main App Logic ---
-st.title("⚡ Singapore EV Chargers Live Status")
 data, update_timestamp = get_lta_data()
 
 if data:
     df = pd.DataFrame(data)
     
-    # Grouping logic to only draw one pin per location/power type
+    # Grouping logic for map pins
     grouped_df = df.groupby(['Name', 'PowerType']).agg({
         'Address': 'first', 'Latitude': 'first', 'Longitude': 'first',
         'Operator': 'first', 'PowerRating': 'first', 'Price': 'first',
@@ -142,13 +123,17 @@ if data:
         total_points = len(statuses)
         
         # Color Logic
-        if available_points == 0: marker_color = "red"
-        else: marker_color = "orange" if row['PowerType'] == "DC" else "green"
+        if available_points == 0: 
+            marker_color = "red"
+        else: 
+            marker_color = "orange" if row['PowerType'] == "DC" else "green"
 
         # Cost Calculations
         parking_cost = park_value * total_hours if park_type == "Per Hour" else park_value
-        try: price_val = float(row.get('Price', 0))
-        except: price_val = 0.0
+        try: 
+            price_val = float(row.get('Price', 0))
+        except: 
+            price_val = 0.0
         total_cost = parking_cost + (price_val * est_kwh)
 
         # Operator Hyperlinks
@@ -169,58 +154,13 @@ if data:
             </div><hr>
             <b>Available: {available_points}/{total_points}</b>
             """
-            folium.Marker([lat, lon], popup=folium.Popup(popup_html, max_width=300),
-                          icon=folium.Icon(color=marker_color, icon="bolt", prefix="fa")).add_to(marker_cluster)
+            folium.Marker(
+                [lat, lon], 
+                popup=folium.Popup(popup_html, max_width=300),
+                icon=folium.Icon(color=marker_color, icon="bolt", prefix="fa")
+            ).add_to(marker_cluster)
 
     st_folium(m, width=1000, height=500, returned_objects=[])
-
-    # --- 5. AI Chatbot Assistant ---
-    st.divider()
-    st.subheader("💬 EV Assistant")
-    
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    if query := st.chat_input("Ask: 'Where is the cheapest charger near Suntec City?'"):
-        st.session_state.messages.append({"role": "user", "content": query})
-        with st.chat_message("user"):
-            st.markdown(query)
-
-        with st.chat_message("assistant"):
-            # Intent Parsing
-            intent_prompt = f"""Return ONLY JSON for query: '{query}'. 
-            Keys: 'landmark' (string or null), 'kwh' (number, default {est_kwh}), 'hours' (number, default {total_hours})."""
-            ai_res = model.generate_content(intent_prompt).text
-            
-            try:
-                intent = json.loads(ai_res.strip())
-                ref_lat, ref_lon = LANDMARKS.get(intent.get('landmark', '').lower(), (1.3521, 103.8198))
-                
-                # Calculate costs for comparison
-                chat_results = []
-                for _, r in grouped_df.iterrows():
-                    dist = haversine(ref_lat, ref_lon, r['Latitude'], r['Longitude'])
-                    p_cost = park_value * intent['hours'] if park_type == "Per Hour" else park_value
-                    try: pr = float(r.get('Price', 0))
-                    except: pr = 0.0
-                    total = p_cost + (pr * intent['kwh'])
-                    chat_results.append({"Name": r['Name'], "Total": total, "Dist": dist})
-                
-                # Filter by distance (5km) and sort by Total Cost
-                top = sorted([res for res in chat_results if res['Dist'] < 5], key=lambda x: x['Total'])[:3]
-                
-                response = f"Cheapest options near {intent.get('landmark', 'your area')}:\n"
-                for i, c in enumerate(top, 1):
-                    response += f"{i}. **{c['Name']}** - S${c['Total']:.2f} (Total) | {c['Dist']:.1f}km away\n"
-            except:
-                response = "I couldn't calculate that. Please specify a landmark like Suntec City or Orchard Road."
-            
-            st.markdown(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
 
     st.subheader("Chargers Table")
     st.dataframe(df)
