@@ -112,6 +112,7 @@ if data:
 
     st.subheader("⚡ Charger Map")
     st.caption(f"Data refreshed every 5 mins. Last Updated: **{update_timestamp}**.")
+    st.caption(f"I drive an EV (Tesla Model 3 Highland) and face two common issues: 1. There are no apps or websites that show all charging points in Singapore and their live availability. Tesla’s UI only shows partial third-party chargers without live availability. 2. Sometimes, cheaper electricity pricing is outweighed by higher parking costs. To address these issues, I built a simple web app that aggregates all EV charging points in Singapore, shows their live availability (refreshed every 5 minutes), and provides a calculator to calculate total charging costs, factoring in parking fees. I’m doing this in my free time, so it may not be as polished or bug-free as a professional app. ")
 
     m = folium.Map(location=[1.3521, 103.8198], zoom_start=12)
     marker_cluster = MarkerCluster().add_to(m)
